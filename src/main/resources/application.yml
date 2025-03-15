@@ -4,5 +4,4 @@ spring:
 api:
   metno:
     base-url: api.met.no
-    timeout: 5000
     user-agent: event-weather-api/0.0.1 https://github.com/mcallistertyler

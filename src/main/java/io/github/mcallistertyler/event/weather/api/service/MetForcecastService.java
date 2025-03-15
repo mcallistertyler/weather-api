@@ -9,6 +9,7 @@ import com.google.common.cache.LoadingCache;
 import io.github.mcallistertyler.event.weather.api.domain.Coordinates;
 import io.github.mcallistertyler.event.weather.api.domain.MetForcecastResponse;
 import java.io.IOException;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
@@ -40,25 +41,26 @@ public class MetForcecastService {
     private final ObjectMapper objectMapper = new ObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
-    private final int maximumCacheSize = 1000;
+    private final int MAX_CACHE_SIZE = 1000;
 
     private final LoadingCache<Coordinates, MetForcecastResponse> forecastResponseCache = CacheBuilder.newBuilder()
-            .maximumSize(maximumCacheSize)
+            .maximumSize(MAX_CACHE_SIZE)
             .recordStats()
+            .expireAfterWrite(Duration.ofHours(2))
             .build(new CacheLoader<>() {
                 @NotNull
                 @Override
-                public MetForcecastResponse load(@NotNull Coordinates coordinates) throws Exception {
+                public MetForcecastResponse load(@NotNull Coordinates coordinates) throws IOException {
                     try {
                         Optional<MetForcecastResponse> forcecastResponse = getForecastFromMetApi(coordinates, null);
                         if (forcecastResponse.isPresent()) {
                             return forcecastResponse.get();
                         } else {
-                            throw new Exception("No response returned from met api for coordinates " + coordinates);
+                            throw new IllegalStateException("No response returned from met api for coordinates " + coordinates);
                         }
-                    } catch (Exception e) {
-                        log.error("Unexpected exception occurred when trying to get forecast response for coordinates: {}", coordinates, e);
-                        throw new Exception("Failed to retrieve forecast response from coordinates", e);
+                    } catch (IOException e) {
+                        log.error("Exception occurred when trying to get forecast response for coordinates: {}", coordinates, e);
+                        throw new IOException("Failed to retrieve forecast response from coordinates", e);
                     }
                 }
             });
@@ -69,13 +71,10 @@ public class MetForcecastService {
 
     public Optional<MetForcecastResponse> getForecast(Coordinates coordinates) {
         try {
-            log.info("Any logging?");
             MetForcecastResponse cachedForceastResponse = forecastResponseCache.getIfPresent(coordinates);
+            log.info("Logging cached responses {}", forecastResponseCache.asMap());
             if (cachedForceastResponse != null) {
-               Instant updatedAt = cachedForceastResponse.updatedAt();
-               boolean olderThanTwoHours = updatedAt.isBefore(Instant.now().minus(2, ChronoUnit.HOURS));
-               boolean notExpired = cachedForceastResponse.expiresHeader() != null && Instant.now().isBefore(httpDateHeaderToInstant(cachedForceastResponse.expiresHeader()));
-               if (notExpired && !olderThanTwoHours) {
+               if (isDataFresh(cachedForceastResponse)) {
                    log.info("Cached forecast has not expired returning.");
                    return Optional.of(cachedForceastResponse);
                }
@@ -97,7 +96,25 @@ public class MetForcecastService {
         }
     }
 
-    public Optional<MetForcecastResponse> getForecastFromMetApi(Coordinates coordinates, String ifModifiedHeader) {
+    public boolean isDataFresh(MetForcecastResponse metForcecastResponse) {
+        Instant updatedAt = metForcecastResponse.updatedAt();
+        Instant expiresTime = httpDateHeaderToInstant(metForcecastResponse.expiresHeader());
+
+        boolean isWithinTwoHours = Duration.between(updatedAt, Instant.now()).toHours() < 2;
+        boolean isBeforeExpiration = false;
+
+        if (expiresTime != null) {
+            isBeforeExpiration = Instant.now().isBefore(expiresTime);
+        }
+
+        if (isBeforeExpiration) {
+            return true;
+        } else {
+            return isWithinTwoHours;
+        }
+    }
+
+    public Optional<MetForcecastResponse> getForecastFromMetApi(Coordinates coordinates, String ifModifiedHeader) throws IOException {
         HttpUrl httpUrl = new HttpUrl.Builder()
                 .scheme("https")
                 .host(baseUrl)
@@ -115,40 +132,42 @@ public class MetForcecastService {
             request.addHeader("If-Modified-Since", ifModifiedHeader);
         }
         try (Response response = httpClient.newCall(request.build()).execute()) {
-            if (response.code() == 304) {
-                log.info("Response is still valid");
-                log.info("Looking at 304 headers {}", response.header("Expires"));
-                response.close();
-                return Optional.empty();
+            switch (response.code()) {
+                case 304:
+                    log.info("304 received for forecast. Re-use previous forecast");
+                    return Optional.empty();
+                case 429:
+                    log.error("Service has been marked for throttling. Consider reducing number of requests of increasing cache expiry.");
+                    return Optional.empty();
+                case 203:
+                    log.warn("Met api has been marked as deprecated or is in beta phase. Consider consulting api.met.no documentation");
+                case 200:
+                    ResponseBody body = response.body();
+                    String lastModifiedHeader = response.header("Last-Modified", null);
+                    String expiresHeader = response.header("Expires", null);
+                    if (body != null) {
+                        String json = body.string();
+                        JsonNode jsonNode = objectMapper.readTree(json);
+                        return MetForcecastResponse.parseMetResponse(jsonNode, lastModifiedHeader, expiresHeader);
+                    }
+                    break;
+                default:
+                    log.warn("Unexpected response code: {}", response.code());
             }
-            if (response.code() == 429) {
-                log.error("Service has been marked for throttling. Consider reducing number of requests of increasing cache expiry.");
-                response.close();
-                return Optional.empty();
-            }
-            if (response.code() == 203) {
-                log.warn("Met api has been marked as deprecated. Consider switching to something else.");
-            }
-            if (response.isSuccessful()) {
-                ResponseBody body = response.body();
-                String lastModifiedHeader = response.header("Last-Modified", null);
-                String expiresHeader = response.header("Expires", null);
-                if (body != null) {
-                    JsonNode jsonNode = objectMapper.readTree(body.string());
-                    response.close();
-                    return MetForcecastResponse.parseMetResponse(jsonNode, lastModifiedHeader, expiresHeader);
-                }
-            }
-            response.close();
             return Optional.empty();
         } catch (IOException e) {
-            log.error("Error when calling weather API", e);
-            return Optional.empty();
+            log.error("Error when calling met weather API", e);
+            throw new IOException("Error when calling met weather API", e);
         }
     }
 
     private Instant httpDateHeaderToInstant(String httpDateHeader) {
-        return DateTimeFormatter.RFC_1123_DATE_TIME
-                .parse(httpDateHeader, Instant::from);
+        try {
+            return DateTimeFormatter.RFC_1123_DATE_TIME
+                    .parse(httpDateHeader, Instant::from);
+        } catch (Exception e) {
+            log.warn("Invalid header {} received in header to instant conversion", httpDateHeader);
+            return null;
+        }
     }
 }

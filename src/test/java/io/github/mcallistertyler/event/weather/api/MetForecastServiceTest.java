@@ -9,10 +9,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import okhttp3.Call;
@@ -27,8 +26,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.MockedStatic;
-import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.util.ResourceUtils;
@@ -38,6 +35,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -52,20 +51,30 @@ public class MetForecastServiceTest {
     @InjectMocks
     private MetForcecastService metForcecastService;
 
+    private String exampleJsonResponse;
+
     @BeforeEach
-    public void setUp() {
+    public void setUp() throws IOException {
         ReflectionTestUtils.setField(metForcecastService, "baseUrl", "test");
         ReflectionTestUtils.setField(metForcecastService, "userAgent", "testUserAgent");
+
+        Path resourcePath = Paths.get(ResourceUtils.getFile("classpath:example-met-response.json").toURI());
+        exampleJsonResponse = Files.readString(resourcePath);
+
+    }
+
+    private String instantToHttpDateHeader(Instant instant) {
+        return DateTimeFormatter.RFC_1123_DATE_TIME
+                .withZone(ZoneId.of("GMT"))
+                .format(instant);
     }
 
     @Test
     public void testSuccessfulResponse() throws IOException {
-        Path resourcePath = Paths.get(ResourceUtils.getFile("classpath:" + "example-met-response.json").toURI());
-        String readJson = Files.readString(resourcePath);
-        String expiresValue = "Sat, 15 Mar 2025 12:20:15 GMT";
-        String lastModifiedValue = "Sat, 15 Mar 2025 11:48:45 GMT";
+        String expiresValue = instantToHttpDateHeader(Instant.now().plus(1, ChronoUnit.HOURS));
+        String lastModifiedValue = instantToHttpDateHeader(Instant.now().plus(30, ChronoUnit.MINUTES));
         Request request = new Request.Builder().url("https://test").build();
-        ResponseBody dummyResponseBody = ResponseBody.create(readJson, MediaType.parse("application/json"));
+        ResponseBody dummyResponseBody = ResponseBody.create(exampleJsonResponse, MediaType.parse("application/json"));
         Response dummyResponse = new Response.Builder()
                 .request(request)
                 .header("Expires", expiresValue)
@@ -83,14 +92,29 @@ public class MetForecastServiceTest {
         assertEquals(lastModifiedValue, response.get().lastModifiedHeader());
     }
 
+
+    @Test
+    public void testUnsuccessfulResponse() throws IOException {
+        Request request = new Request.Builder().url("https://test").build();
+        Response dummyResponse = new Response.Builder()
+                .request(request)
+                .protocol(Protocol.HTTP_1_1)
+                .code(400)
+                .message("Mandatory parameter 'lon' missing in call to Metno::WeatherAPI::Controller::Product::try {...}")
+                .body(null)
+                .build();
+        when(okHttpClient.newCall(any())).thenReturn(call);
+        when(call.execute()).thenReturn(dummyResponse);
+        Optional<MetForcecastResponse> response = metForcecastService.getForecast(new Coordinates(59.911, 10.750));
+        assertEquals(Optional.empty(), response);
+    }
+
     @Test
     public void checkCachePopulated() throws IOException {
-        Path resourcePath = Paths.get(ResourceUtils.getFile("classpath:" + "example-met-response.json").toURI());
-        String readJson = Files.readString(resourcePath);
-        String expiresValue = "Sat, 15 Mar 2025 12:20:15 GMT";
-        String lastModifiedValue = "Sat, 15 Mar 2025 11:48:45 GMT";
+        String expiresValue = instantToHttpDateHeader(Instant.now().plus(1, ChronoUnit.HOURS));
+        String lastModifiedValue = instantToHttpDateHeader(Instant.now().plus(30, ChronoUnit.MINUTES));
         Request request = new Request.Builder().url("https://test").build();
-        ResponseBody dummyResponseBody = ResponseBody.create(readJson, MediaType.parse("application/json"));
+        ResponseBody dummyResponseBody = ResponseBody.create(exampleJsonResponse, MediaType.parse("application/json"));
         Response dummyResponse = new Response.Builder()
                 .request(request)
                 .header("Expires", expiresValue)
@@ -113,14 +137,34 @@ public class MetForecastServiceTest {
         assertTrue(cache.asMap().containsKey(exampleCoordinates));
     }
 
+
+    @Test
+    public void checkCacheNotPopulatedWithOptionalEmpty() throws IOException {
+        Request request = new Request.Builder().url("https://test").build();
+        Response dummyResponse = new Response.Builder()
+                .request(request)
+                .protocol(Protocol.HTTP_1_1)
+                .code(400)
+                .message("Mandatory parameter 'lon' missing in call to Metno::WeatherAPI::Controller::Product::try {...}")
+                .body(null)
+                .build();
+        when(okHttpClient.newCall(any())).thenReturn(call);
+        when(call.execute()).thenReturn(dummyResponse);
+        metForcecastService.getForecast(new Coordinates(59.911, 10.750));
+
+        @SuppressWarnings("unchecked")
+        LoadingCache<Coordinates, MetForcecastResponse> cache =
+                (LoadingCache<Coordinates, MetForcecastResponse>) ReflectionTestUtils.getField(
+                        metForcecastService, "forecastResponseCache");
+        assertEquals(0L, cache.size());
+    }
+
     @Test
     public void fetchesExistingFromCacheWithSimilarCoordinates() throws IOException {
-        Path resourcePath = Paths.get(ResourceUtils.getFile("classpath:" + "example-met-response.json").toURI());
-        String readJson = Files.readString(resourcePath);
-        String expiresValue = "Sat, 15 Mar 2025 12:20:15 GMT";
-        String lastModifiedValue = "Sat, 15 Mar 2025 11:48:45 GMT";
+        String expiresValue = instantToHttpDateHeader(Instant.now().plus(1, ChronoUnit.HOURS));
+        String lastModifiedValue = instantToHttpDateHeader(Instant.now().plus(30, ChronoUnit.MINUTES));
         Request request = new Request.Builder().url("https://test").build();
-        ResponseBody dummyResponseBody = ResponseBody.create(readJson, MediaType.parse("application/json"));
+        ResponseBody dummyResponseBody = ResponseBody.create(exampleJsonResponse, MediaType.parse("application/json"));
         Response dummyResponse = new Response.Builder()
                 .request(request)
                 .header("Expires", expiresValue)
@@ -143,18 +187,19 @@ public class MetForecastServiceTest {
 
         assertEquals(first_metForcecastResponse, second_metForecastResponse);
         assertEquals(1, cache.stats().hitCount());
+        verify(okHttpClient, times(1)).newCall(any());
     }
 
     @Test
-    public void fetchesNewValueIfExpired() throws IOException {
-        Path resourcePath = Paths.get(ResourceUtils.getFile("classpath:" + "example-met-response.json").toURI());
-        String readJson = Files.readString(resourcePath);
-        String expiresValue = "Fri, 14 Mar 2025 12:20:15 GMT";
+    public void fetchesNewValueIfHeaderExpired() throws IOException {
+        String expiresValue = instantToHttpDateHeader(Instant.now().minus(30, ChronoUnit.MINUTES));
+        String lastModifiedValue = instantToHttpDateHeader(Instant.now().minus(1, ChronoUnit.HOURS));
         Request request = new Request.Builder().url("https://test").build();
-        ResponseBody dummyResponseBody = ResponseBody.create(readJson, MediaType.parse("application/json"));
+        ResponseBody dummyResponseBody = ResponseBody.create(exampleJsonResponse, MediaType.parse("application/json"));
         Response dummyResponse = new Response.Builder()
                 .request(request)
                 .header("Expires", expiresValue)
+                .header("Last-Modified", lastModifiedValue)
                 .protocol(Protocol.HTTP_1_1)
                 .code(200)
                 .message("OK")
@@ -164,17 +209,57 @@ public class MetForecastServiceTest {
         when(call.execute()).thenReturn(dummyResponse);
 
         Coordinates exampleCoordinates = new Coordinates(59.911, 10.750);
-
         @SuppressWarnings("unchecked")
         LoadingCache<Coordinates, MetForcecastResponse> cache = (LoadingCache<Coordinates, MetForcecastResponse>) ReflectionTestUtils.getField(metForcecastService, "forecastResponseCache");
 
         Instant lastWeek = Instant.now().minus(2, ChronoUnit.HOURS);
-        MetForcecastResponse.TimeSeries timeSeries = new MetForcecastResponse.TimeSeries(Instant.now().plus(1, ChronoUnit.HOURS), 1.0, -7.0);
-        MetForcecastResponse existingCachedResponse = new MetForcecastResponse(lastWeek, "", expiresValue, List.of(timeSeries));
+        MetForcecastResponse existingCachedResponse = new MetForcecastResponse(lastWeek, lastModifiedValue, expiresValue, List.of(createTimeSeries(5.0, 22.5)));
         cache.put(exampleCoordinates, existingCachedResponse);
         Optional<MetForcecastResponse> newResponse = metForcecastService.getForecast(exampleCoordinates);
         assertTrue(newResponse.isPresent());
         assertNotEquals(newResponse.get(), existingCachedResponse);
+    }
+
+    @Test
+    public void doesNotFetchNewValueIfLessThanTwoHoursOld() {
+
+        String expiresValue = instantToHttpDateHeader(Instant.now().minus(30, ChronoUnit.MINUTES));
+        String lastModifiedValue = instantToHttpDateHeader(Instant.now().minus(1, ChronoUnit.HOURS));
+        Instant updatedAt = Instant.now().minus(1, ChronoUnit.HOURS).minus(59, ChronoUnit.MINUTES);
+
+        Coordinates exampleCoordinates = new Coordinates(59.911, 10.750);
+        MetForcecastResponse existingCachedResponse = new MetForcecastResponse(updatedAt, lastModifiedValue, expiresValue, List.of(createTimeSeries(1.0, -9.0)));
+
+        @SuppressWarnings("unchecked")
+        LoadingCache<Coordinates, MetForcecastResponse> cache = (LoadingCache<Coordinates, MetForcecastResponse>) ReflectionTestUtils.getField(metForcecastService, "forecastResponseCache");
+
+        cache.put(exampleCoordinates, existingCachedResponse);
+        metForcecastService.getForecast(exampleCoordinates);
+        verify(okHttpClient, times(0)).newCall(any());
+    }
+
+    @Test
+    public void doesntFetchNewValueIfExpireHeaderNotOld() {
+
+        Instant now = Instant.now();
+        String expiresValue = instantToHttpDateHeader(now.plus(1, ChronoUnit.HOURS));
+        String lastModifiedValue = instantToHttpDateHeader(now.plus(30, ChronoUnit.MINUTES));
+        Instant updatedAt = now.minus(30, ChronoUnit.MINUTES);
+
+        Coordinates exampleCoordinates = new Coordinates(59.911, 10.750);
+        MetForcecastResponse.TimeSeries timeSeries = new MetForcecastResponse.TimeSeries(Instant.now().plus(1, ChronoUnit.HOURS), 1.0, -7.0);
+        MetForcecastResponse existingCachedResponse = new MetForcecastResponse(updatedAt, lastModifiedValue, expiresValue, List.of(timeSeries));
+
+        @SuppressWarnings("unchecked")
+        LoadingCache<Coordinates, MetForcecastResponse> cache = (LoadingCache<Coordinates, MetForcecastResponse>) ReflectionTestUtils.getField(metForcecastService, "forecastResponseCache");
+
+        cache.put(exampleCoordinates, existingCachedResponse);
+        metForcecastService.getForecast(exampleCoordinates);
+        verify(okHttpClient, times(0)).newCall(any());
+    }
+
+    private MetForcecastResponse.TimeSeries createTimeSeries(Double windSpeed, Double airTemperature) {
+        return new MetForcecastResponse.TimeSeries(Instant.now(), windSpeed, airTemperature);
     }
 
 

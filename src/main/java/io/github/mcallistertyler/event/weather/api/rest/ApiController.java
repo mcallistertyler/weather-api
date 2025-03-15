@@ -42,7 +42,7 @@ public class ApiController {
         Coordinates coordinates = new Coordinates(lat, lon);
         if (!isWithinNextWeek(startDateTime)) {
             log.error("Request is not within the next 7 days");
-            return ResponseEntity.status(400).body(new ApiForecastResponse(Collections.emptyList()));
+            return ResponseEntity.status(400).body(new ApiForecastResponse(Collections.emptyList(), "Request is not within the next 7 days", 400));
         }
         Optional<MetForcecastResponse> forecastResponseOptional = metForcecastService.getForecast(coordinates);
         if (forecastResponseOptional.isPresent()) {
@@ -55,7 +55,7 @@ public class ApiController {
             return ResponseEntity.badRequest().body(apiForecastResponse);
         }
         log.error("No forecast was found for given lat/lon: {}/{} for start time:{} and end time: {}", lat, lon, startDateTime, endDateTime);
-        return ResponseEntity.badRequest().body(new ApiForecastResponse(Collections.emptyList()));
+        return ResponseEntity.badRequest().body(new ApiForecastResponse(Collections.emptyList(), "No forecast found for given lat/lon values", 404));
     }
 
     private ApiForecastResponse createApiResponse(MetForcecastResponse metForcecastResponse, Instant startDateTime, Instant endDateTime) {
@@ -63,7 +63,7 @@ public class ApiController {
                 .stream()
                 .filter(timeSeries -> timeSeries.time().compareTo(startDateTime) >= 0 && timeSeries.time().compareTo(endDateTime) <= 0)
                 .toList();
-        return new ApiForecastResponse(timeSeriesBetweenEventTimes);
+        return new ApiForecastResponse(timeSeriesBetweenEventTimes, "OK", 200);
     }
 
 
