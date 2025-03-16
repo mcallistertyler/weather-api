@@ -10,9 +10,6 @@ import io.github.mcallistertyler.event.weather.api.domain.Coordinates;
 import io.github.mcallistertyler.event.weather.api.domain.MetForcecastResponse;
 import java.io.IOException;
 import java.time.Duration;
-import java.time.Instant;
-import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoUnit;
 import java.util.Optional;
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
@@ -74,8 +71,8 @@ public class MetForcecastService {
             MetForcecastResponse cachedForceastResponse = forecastResponseCache.getIfPresent(coordinates);
             log.info("Logging cached responses {}", forecastResponseCache.asMap());
             if (cachedForceastResponse != null) {
-               if (isDataFresh(cachedForceastResponse)) {
-                   log.info("Cached forecast has not expired returning.");
+               if (cachedForceastResponse.isDataFresh()) {
+                   log.info("Returning cached response since it has not yet expired.");
                    return Optional.of(cachedForceastResponse);
                }
 
@@ -96,23 +93,6 @@ public class MetForcecastService {
         }
     }
 
-    public boolean isDataFresh(MetForcecastResponse metForcecastResponse) {
-        Instant updatedAt = metForcecastResponse.updatedAt();
-        Instant expiresTime = httpDateHeaderToInstant(metForcecastResponse.expiresHeader());
-
-        boolean isWithinTwoHours = Duration.between(updatedAt, Instant.now()).toHours() < 2;
-        boolean isBeforeExpiration = false;
-
-        if (expiresTime != null) {
-            isBeforeExpiration = Instant.now().isBefore(expiresTime);
-        }
-
-        if (isBeforeExpiration) {
-            return true;
-        } else {
-            return isWithinTwoHours;
-        }
-    }
 
     public Optional<MetForcecastResponse> getForecastFromMetApi(Coordinates coordinates, String ifModifiedHeader) throws IOException {
         HttpUrl httpUrl = new HttpUrl.Builder()
@@ -161,13 +141,4 @@ public class MetForcecastService {
         }
     }
 
-    private Instant httpDateHeaderToInstant(String httpDateHeader) {
-        try {
-            return DateTimeFormatter.RFC_1123_DATE_TIME
-                    .parse(httpDateHeader, Instant::from);
-        } catch (Exception e) {
-            log.warn("Invalid header {} received in header to instant conversion", httpDateHeader);
-            return null;
-        }
-    }
 }
