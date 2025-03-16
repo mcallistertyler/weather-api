@@ -3,7 +3,7 @@
 
 This is the source code for the weather API. It serves as a basic implementation of an example of a microservice that allows a user to send information about upcoming events (latitude, longitude, start date and end date) to retrieve either a weather response for the next hour or a forecast for the entire duration of the event.
 
-The service was written in Java 21 and is built via gradle. A gradle wrapper is included with the code. Build, run and test shell scripts are also included to simplify the process.
+The service was written in Java 21 and is built via Gradle 4.10.2. A gradle wrapper is included with the code. Build, run and test shell scripts are also included to simplify the process.
 
 ## List of improvements
 
