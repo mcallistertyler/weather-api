@@ -15,6 +15,7 @@ Some improvements could be made both technically and conceptually, such as:
 - Metrics and monitoring would be useful to add if we want to look closely at cache hit rate or API response times. These can be collected via Prometheus and viewed via Grafana or Datadog.
 - There are tests missing for the API itself. Verifying how responses look can be useful.
 - Load testing would be beneficial to measure how well the service deals with high traffic.
+- Temperature is presented in celsius. For customers in other parts of the world who use fahrenheit this would be confusing. Writing some code to convert it based on which part of the world is querying the API would be a nice quality of life feature.
 
 ## MET API Considerations
 
