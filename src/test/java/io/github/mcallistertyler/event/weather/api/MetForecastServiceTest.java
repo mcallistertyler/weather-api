@@ -2,8 +2,9 @@ package io.github.mcallistertyler.event.weather.api;
 
 import com.google.common.cache.LoadingCache;
 import io.github.mcallistertyler.event.weather.api.domain.Coordinates;
-import io.github.mcallistertyler.event.weather.api.domain.MetForcecastResponse;
-import io.github.mcallistertyler.event.weather.api.service.MetForcecastService;
+import io.github.mcallistertyler.event.weather.api.domain.MetForecastResponse;
+import io.github.mcallistertyler.event.weather.api.domain.WeatherData;
+import io.github.mcallistertyler.event.weather.api.service.MetForecastService;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -49,22 +50,22 @@ public class MetForecastServiceTest {
     private Call call;
 
     @InjectMocks
-    private MetForcecastService metForcecastService;
+    private MetForecastService metForecastService;
 
     private String exampleJsonResponse;
 
     @BeforeEach
     public void setUp() throws IOException {
-        ReflectionTestUtils.setField(metForcecastService, "baseUrl", "test");
-        ReflectionTestUtils.setField(metForcecastService, "userAgent", "testUserAgent");
+        ReflectionTestUtils.setField(metForecastService, "baseUrl", "test");
+        ReflectionTestUtils.setField(metForecastService, "userAgent", "testUserAgent");
 
         Path resourcePath = Paths.get(ResourceUtils.getFile("classpath:example-met-response.json").toURI());
         exampleJsonResponse = Files.readString(resourcePath);
 
     }
 
-    private MetForcecastResponse.TimeSeries createTimeSeries(Double windSpeed, Double airTemperature) {
-        return new MetForcecastResponse.TimeSeries(Instant.now(), windSpeed, airTemperature);
+    private WeatherData createWeatherData(Double windSpeed, Double airTemperature) {
+        return new WeatherData(Instant.now(), windSpeed, airTemperature);
     }
 
     private String instantToHttpDateHeader(Instant instant) {
@@ -107,7 +108,7 @@ public class MetForecastServiceTest {
         Response dummyResponse = createDummySuccessResponse(exampleJsonResponse, expiresValue, lastModifiedValue);
         when(okHttpClient.newCall(any())).thenReturn(call);
         when(call.execute()).thenReturn(dummyResponse);
-        Optional<MetForcecastResponse> response = metForcecastService.getForecast(new Coordinates(59.911, 10.750));
+        Optional<MetForecastResponse> response = metForecastService.getForecast(new Coordinates(59.911, 10.750));
         assertTrue(response.isPresent());
         assertEquals(expiresValue, response.get().expiresHeader());
         assertEquals(lastModifiedValue, response.get().lastModifiedHeader());
@@ -119,7 +120,7 @@ public class MetForecastServiceTest {
         Response dummyResponse = createDummyUnsuccessfulResponse();
         when(okHttpClient.newCall(any())).thenReturn(call);
         when(call.execute()).thenReturn(dummyResponse);
-        Optional<MetForcecastResponse> response = metForcecastService.getForecast(new Coordinates(59.911, 10.750));
+        Optional<MetForecastResponse> response = metForecastService.getForecast(new Coordinates(59.911, 10.750));
         assertEquals(Optional.empty(), response);
     }
 
@@ -132,16 +133,14 @@ public class MetForecastServiceTest {
         when(call.execute()).thenReturn(dummyResponse);
 
         Coordinates exampleCoordinates = new Coordinates(59.911, 10.750);
-        metForcecastService.getForecast(exampleCoordinates);
+        metForecastService.getForecast(exampleCoordinates);
 
         @SuppressWarnings("unchecked")
-        LoadingCache<Coordinates, MetForcecastResponse> cache =
-                (LoadingCache<Coordinates, MetForcecastResponse>) ReflectionTestUtils.getField(
-                        metForcecastService, "forecastResponseCache");
+        LoadingCache<Coordinates, MetForecastResponse> cache =
+                (LoadingCache<Coordinates, MetForecastResponse>) ReflectionTestUtils.getField(
+                        metForecastService, "forecastCache");
         assertTrue(cache.asMap().containsKey(exampleCoordinates));
     }
-
-
 
     @Test
     public void checkCacheNotPopulatedWithOptionalEmpty() throws IOException {
@@ -155,12 +154,12 @@ public class MetForecastServiceTest {
                 .build();
         when(okHttpClient.newCall(any())).thenReturn(call);
         when(call.execute()).thenReturn(dummyResponse);
-        metForcecastService.getForecast(new Coordinates(59.911, 10.750));
+        metForecastService.getForecast(new Coordinates(59.911, 10.750));
 
         @SuppressWarnings("unchecked")
-        LoadingCache<Coordinates, MetForcecastResponse> cache =
-                (LoadingCache<Coordinates, MetForcecastResponse>) ReflectionTestUtils.getField(
-                        metForcecastService, "forecastResponseCache");
+        LoadingCache<Coordinates, MetForecastResponse> cache =
+                (LoadingCache<Coordinates, MetForecastResponse>) ReflectionTestUtils.getField(
+                        metForecastService, "forecastCache");
         assertEquals(0L, cache.size());
     }
 
@@ -173,14 +172,14 @@ public class MetForecastServiceTest {
         when(call.execute()).thenReturn(dummyResponse);
 
         @SuppressWarnings("unchecked")
-        LoadingCache<Coordinates, MetForcecastResponse> cache = (LoadingCache<Coordinates, MetForcecastResponse>) ReflectionTestUtils.getField(metForcecastService, "forecastResponseCache");
+        LoadingCache<Coordinates, MetForecastResponse> cache = (LoadingCache<Coordinates, MetForecastResponse>) ReflectionTestUtils.getField(metForecastService, "forecastCache");
 
         Coordinates exampleCoordinates = new Coordinates(59.911, 10.750);
         Coordinates exampleSimilarCoordinates = new Coordinates(59.9112376427, 10.75102837);
-        Optional<MetForcecastResponse> first_metForcecastResponse = metForcecastService.getForecast(exampleCoordinates);
-        Optional<MetForcecastResponse> second_metForecastResponse = metForcecastService.getForecast(exampleSimilarCoordinates);
+        Optional<MetForecastResponse> firstMetForecastResponse = metForecastService.getForecast(exampleCoordinates);
+        Optional<MetForecastResponse> secondMetForecastResponse = metForecastService.getForecast(exampleSimilarCoordinates);
 
-        assertEquals(first_metForcecastResponse, second_metForecastResponse);
+        assertEquals(firstMetForecastResponse, secondMetForecastResponse);
         assertEquals(1, cache.stats().hitCount());
         verify(okHttpClient, times(1)).newCall(any());
     }
@@ -195,12 +194,12 @@ public class MetForecastServiceTest {
 
         Coordinates exampleCoordinates = new Coordinates(59.911, 10.750);
         @SuppressWarnings("unchecked")
-        LoadingCache<Coordinates, MetForcecastResponse> cache = (LoadingCache<Coordinates, MetForcecastResponse>) ReflectionTestUtils.getField(metForcecastService, "forecastResponseCache");
+        LoadingCache<Coordinates, MetForecastResponse> cache = (LoadingCache<Coordinates, MetForecastResponse>) ReflectionTestUtils.getField(metForecastService, "forecastCache");
 
         Instant lastWeek = Instant.now().minus(2, ChronoUnit.HOURS);
-        MetForcecastResponse existingCachedResponse = new MetForcecastResponse(lastWeek, lastModifiedValue, expiresValue, List.of(createTimeSeries(5.0, 22.5)));
+        MetForecastResponse existingCachedResponse = new MetForecastResponse(lastWeek, lastModifiedValue, expiresValue, List.of(createWeatherData(5.0, 22.5)));
         cache.put(exampleCoordinates, existingCachedResponse);
-        Optional<MetForcecastResponse> newResponse = metForcecastService.getForecast(exampleCoordinates);
+        Optional<MetForecastResponse> newResponse = metForecastService.getForecast(exampleCoordinates);
         assertTrue(newResponse.isPresent());
         assertNotEquals(newResponse.get(), existingCachedResponse);
     }
@@ -213,13 +212,13 @@ public class MetForecastServiceTest {
         Instant updatedAt = Instant.now().minus(1, ChronoUnit.HOURS).minus(59, ChronoUnit.MINUTES);
 
         Coordinates exampleCoordinates = new Coordinates(59.911, 10.750);
-        MetForcecastResponse existingCachedResponse = new MetForcecastResponse(updatedAt, lastModifiedValue, expiresValue, List.of(createTimeSeries(1.0, -9.0)));
+        MetForecastResponse existingCachedResponse = new MetForecastResponse(updatedAt, lastModifiedValue, expiresValue, List.of(createWeatherData(1.0, -9.0)));
 
         @SuppressWarnings("unchecked")
-        LoadingCache<Coordinates, MetForcecastResponse> cache = (LoadingCache<Coordinates, MetForcecastResponse>) ReflectionTestUtils.getField(metForcecastService, "forecastResponseCache");
+        LoadingCache<Coordinates, MetForecastResponse> cache = (LoadingCache<Coordinates, MetForecastResponse>) ReflectionTestUtils.getField(metForecastService, "forecastCache");
 
         cache.put(exampleCoordinates, existingCachedResponse);
-        metForcecastService.getForecast(exampleCoordinates);
+        metForecastService.getForecast(exampleCoordinates);
         verify(okHttpClient, times(0)).newCall(any());
     }
 
@@ -232,14 +231,14 @@ public class MetForecastServiceTest {
         Instant updatedAt = now.minus(30, ChronoUnit.MINUTES);
 
         Coordinates exampleCoordinates = new Coordinates(59.911, 10.750);
-        MetForcecastResponse.TimeSeries timeSeries = new MetForcecastResponse.TimeSeries(Instant.now().plus(1, ChronoUnit.HOURS), 1.0, -7.0);
-        MetForcecastResponse existingCachedResponse = new MetForcecastResponse(updatedAt, lastModifiedValue, expiresValue, List.of(timeSeries));
+        WeatherData weatherData = new WeatherData(Instant.now().plus(1, ChronoUnit.HOURS), 1.0, -7.0);
+        MetForecastResponse existingCachedResponse = new MetForecastResponse(updatedAt, lastModifiedValue, expiresValue, List.of(weatherData));
 
         @SuppressWarnings("unchecked")
-        LoadingCache<Coordinates, MetForcecastResponse> cache = (LoadingCache<Coordinates, MetForcecastResponse>) ReflectionTestUtils.getField(metForcecastService, "forecastResponseCache");
+        LoadingCache<Coordinates, MetForecastResponse> cache = (LoadingCache<Coordinates, MetForecastResponse>) ReflectionTestUtils.getField(metForecastService, "forecastCache");
 
         cache.put(exampleCoordinates, existingCachedResponse);
-        metForcecastService.getForecast(exampleCoordinates);
+        metForecastService.getForecast(exampleCoordinates);
         verify(okHttpClient, times(0)).newCall(any());
     }
 

@@ -3,7 +3,7 @@ package io.github.mcallistertyler.event.weather.api;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.mcallistertyler.event.weather.api.domain.MetForcecastResponse;
+import io.github.mcallistertyler.event.weather.api.domain.MetForecastResponse;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -28,9 +28,9 @@ public class MetForecastResponseTest {
         JsonNode jsonNode = objectMapper.readTree(readJson);
         String lastModified = "";
         String expires = "";
-        Optional<MetForcecastResponse> metForcecastResponse = MetForcecastResponse.parseMetResponse(jsonNode, lastModified, expires);
-        assertTrue(metForcecastResponse.isPresent());
-        assertNotNull(metForcecastResponse.get().updatedAt());
+        Optional<MetForecastResponse> metForecastResponse = MetForecastResponse.parseMetResponse(jsonNode, lastModified, expires);
+        assertTrue(metForecastResponse.isPresent());
+        assertNotNull(metForecastResponse.get().updatedAt());
     }
 
 }

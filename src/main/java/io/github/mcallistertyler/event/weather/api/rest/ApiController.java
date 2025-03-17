@@ -2,8 +2,9 @@ package io.github.mcallistertyler.event.weather.api.rest;
 
 import io.github.mcallistertyler.event.weather.api.domain.Coordinates;
 import io.github.mcallistertyler.event.weather.api.domain.ApiForecastResponse;
-import io.github.mcallistertyler.event.weather.api.domain.MetForcecastResponse;
-import io.github.mcallistertyler.event.weather.api.service.MetForcecastService;
+import io.github.mcallistertyler.event.weather.api.domain.MetForecastResponse;
+import io.github.mcallistertyler.event.weather.api.domain.WeatherData;
+import io.github.mcallistertyler.event.weather.api.service.MetForecastService;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -26,10 +27,10 @@ public class ApiController {
 
     private static final Logger log = LoggerFactory.getLogger(ApiController.class);
 
-    private final MetForcecastService metForcecastService;
+    private final MetForecastService metForecastService;
 
-    public ApiController(MetForcecastService metForcecastService) {
-        this.metForcecastService = metForcecastService;
+    public ApiController(MetForecastService metForecastService) {
+        this.metForecastService = metForecastService;
     }
 
     @GetMapping(value="")
@@ -43,15 +44,15 @@ public class ApiController {
             return invalidStartDateResponse();
         }
 
-        Optional<MetForcecastResponse> forecastResponseOptional = getForecastForCoordinates(lat, lon);
+        Optional<MetForecastResponse> forecastResponseOptional = getForecastForCoordinates(lat, lon);
         if (forecastResponseOptional.isEmpty()) {
             return emptyMetforecastResponse(lat, lon, startDateTime, endDateTime);
         }
 
-        MetForcecastResponse metForcecastResponse = forecastResponseOptional.get();
-        ApiForecastResponse apiForecastResponse = createCurrentTimeResponse(metForcecastResponse);
+        MetForecastResponse metForecastResponse = forecastResponseOptional.get();
+        ApiForecastResponse apiForecastResponse = createCurrentTimeResponse(metForecastResponse);
 
-        if (apiForecastResponse.timeSeries().isEmpty()) {
+        if (apiForecastResponse.weatherData().isEmpty()) {
             return noContentResponse(lat, lon, startDateTime, endDateTime);
         }
 
@@ -68,15 +69,15 @@ public class ApiController {
         if (!isWithinNextWeek(startDateTime)) {
             return invalidStartDateResponse();
         }
-        Optional<MetForcecastResponse> forecastResponseOptional = getForecastForCoordinates(lat, lon);
+        Optional<MetForecastResponse> forecastResponseOptional = getForecastForCoordinates(lat, lon);
         if (forecastResponseOptional.isEmpty()) {
             return emptyMetforecastResponse(lat, lon, startDateTime, endDateTime);
         }
 
-        MetForcecastResponse metForcecastResponse = forecastResponseOptional.get();
-        ApiForecastResponse apiForecastResponse = createTimeRangeResponse(metForcecastResponse, startDateTime, endDateTime);
+        MetForecastResponse metForecastResponse = forecastResponseOptional.get();
+        ApiForecastResponse apiForecastResponse = createTimeRangeResponse(metForecastResponse, startDateTime, endDateTime);
 
-        if (apiForecastResponse.timeSeries().isEmpty()) {
+        if (apiForecastResponse.weatherData().isEmpty()) {
             return noContentResponse(lat, lon, startDateTime, endDateTime);
         }
 
@@ -98,32 +99,32 @@ public class ApiController {
         return ResponseEntity.badRequest().body(new ApiForecastResponse(Collections.emptyList(), "Request is not within the next 7 days", 400));
     }
 
-    public Optional<MetForcecastResponse> getForecastForCoordinates(double lat, double lon) {
+    public Optional<MetForecastResponse> getForecastForCoordinates(double lat, double lon) {
         Coordinates coordinates = new Coordinates(lat, lon);
-        return metForcecastService.getForecast(coordinates);
+        return metForecastService.getForecast(coordinates);
     }
 
-    private ApiForecastResponse createCurrentTimeResponse(MetForcecastResponse metForcecastResponse) {
+    private ApiForecastResponse createCurrentTimeResponse(MetForecastResponse metForecastResponse) {
         Instant now = Instant.now();
-        List<MetForcecastResponse.TimeSeries> singleTimeSeries = metForcecastResponse.timeSeries().stream()
+        List<WeatherData> weatherData = metForecastResponse.weatherDataList().stream()
                 .filter(timeSeries -> timeSeries.time().isAfter(now))
                 .min((timeSeries1, timeSeries2) -> {
                     Duration duration1 = Duration.between(now, timeSeries1.time());
                     Duration duration2 = Duration.between(now, timeSeries2.time());
                     return  duration1.compareTo(duration2);
                 }).stream().toList();
-        if (singleTimeSeries.isEmpty()) {
-            return new ApiForecastResponse(singleTimeSeries, "OK", 204);
+        if (weatherData.isEmpty()) {
+            return new ApiForecastResponse(weatherData, "OK", 204);
         }
-        return new ApiForecastResponse(singleTimeSeries, "OK", 200);
+        return new ApiForecastResponse(weatherData, "OK", 200);
     }
 
-    private ApiForecastResponse createTimeRangeResponse(MetForcecastResponse metForcecastResponse, Instant startDateTime, Instant endDateTime) {
-        List<MetForcecastResponse.TimeSeries> timeSeriesBetweenEventTimes = metForcecastResponse.timeSeries()
+    private ApiForecastResponse createTimeRangeResponse(MetForecastResponse metForecastResponse, Instant startDateTime, Instant endDateTime) {
+        List<WeatherData> weatherDataBetweenEventTimes = metForecastResponse.weatherDataList()
                 .stream()
                 .filter(timeSeries -> timeSeries.time().compareTo(startDateTime) >= 0 && timeSeries.time().compareTo(endDateTime) <= 0)
                 .toList();
-        return new ApiForecastResponse(timeSeriesBetweenEventTimes, "OK", 200);
+        return new ApiForecastResponse(weatherDataBetweenEventTimes, "OK", 200);
     }
 
 
@@ -131,7 +132,7 @@ public class ApiController {
         ZoneId utc = ZoneId.of("UTC");
         LocalDate startDate = startDateTime.atZone(utc).toLocalDate();
         LocalDate today = LocalDate.now(utc);
-        LocalDate sevenDayslater = today.plusDays(7);
-        return !startDate.isBefore(today) && !startDate.isAfter(sevenDayslater);
+        LocalDate sevenDaysLater = today.plusDays(7);
+        return !startDate.isBefore(today) && !startDate.isAfter(sevenDaysLater);
     }
 }

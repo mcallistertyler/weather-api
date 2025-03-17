@@ -16,10 +16,64 @@ Some improvements could be made both technically and conceptually, such as:
 - There are tests missing for the API itself. Verifying how responses look can be useful.
 - Load testing would be beneficial to measure how well the service deals with high traffic.
 
-## MET Api
+## MET API Considerations
+
 There are some considerations to keep in mind while using the MET Weather API.
 
 The API has bandwith requirements:
 > "20 requests/second per application (total, not per client) requires special agreement"
 
 So in addition to adding monitoring to all API calls a threshold value could be used to prevent further requests or rate limiting methods could be used.
+
+## Endpoints
+
+Returns the weather forecast for the nearest available time after the current moment.
+
+#### Endpoints
+
+```
+GET /forecast
+```
+```
+GET /forecast/extended
+```
+
+Both endpoints return the same json response however `/forecast` will only return the next hour while `/forecast/extended` will return a full forecast
+between the `startDateTime` and `endDateTime` provided.
+
+#### Query Parameters
+
+| Parameter     | Type    | Description                                                  |
+|---------------|---------|--------------------------------------------------------------|
+| lat           | double  | Latitude coordinate                                          |
+| lon           | double  | Longitude coordinate                                          |
+| startDateTime | Instant | Start date and time (ISO 8601 format)                        |
+| endDateTime   | Instant | End date and time (ISO 8601 format)                          |
+
+#### Response
+
+```json
+{
+  "weatherData": [
+    {
+      "time": "2025-03-17T15:00:00Z",
+      "windSpeed": 1.9,
+      "airTemperature": 6.0
+    }
+  ],
+  "message": "OK",
+  "statusCode": 200
+}
+```
+
+#### Status Codes
+
+- `200 OK`: Request successful
+- `204 No Content`: No forecast data available for the requested parameters
+- `400 Bad Request`: Invalid request parameters (including when startDateTime is not within the next 7 days)
+- `404 Not Found`: No forecast found for given coordinates
+
+## Local Testing
+Java 21 and Gradle 4.10.2 are required to build and run the code. Convenience build and run scripts are included.
+A curl script (`./curl.sh`) is also included to show two example requests. It includes clean JSON parsing via [jq](https://github.com/jqlang/jq) so you'll
+have to make sure that's installed to run the script.

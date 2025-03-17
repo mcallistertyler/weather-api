@@ -7,7 +7,7 @@ import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import io.github.mcallistertyler.event.weather.api.domain.Coordinates;
-import io.github.mcallistertyler.event.weather.api.domain.MetForcecastResponse;
+import io.github.mcallistertyler.event.weather.api.domain.MetForecastResponse;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Optional;
@@ -23,9 +23,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 @Service
-public class MetForcecastService {
+public class MetForecastService {
 
-    private static final Logger log = LoggerFactory.getLogger(MetForcecastService.class);
+    private static final Logger log = LoggerFactory.getLogger(MetForecastService.class);
 
     @Value("${api.metno.base-url}")
     private String baseUrl;
@@ -39,19 +39,20 @@ public class MetForcecastService {
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
     private final int MAX_CACHE_SIZE = 1000;
+    private final Duration CACHE_EXPIRATION = Duration.ofHours(2);
 
-    private final LoadingCache<Coordinates, MetForcecastResponse> forecastResponseCache = CacheBuilder.newBuilder()
+    private final LoadingCache<Coordinates, MetForecastResponse> forecastCache = CacheBuilder.newBuilder()
             .maximumSize(MAX_CACHE_SIZE)
             .recordStats()
-            .expireAfterWrite(Duration.ofHours(2))
+            .expireAfterWrite(CACHE_EXPIRATION)
             .build(new CacheLoader<>() {
                 @NotNull
                 @Override
-                public MetForcecastResponse load(@NotNull Coordinates coordinates) throws IOException {
+                public MetForecastResponse load(@NotNull Coordinates coordinates) throws IOException {
                     try {
-                        Optional<MetForcecastResponse> forcecastResponse = getForecastFromMetApi(coordinates, null);
-                        if (forcecastResponse.isPresent()) {
-                            return forcecastResponse.get();
+                        Optional<MetForecastResponse> forecastResponse = fetchMetForecastFromApi(coordinates, null);
+                        if (forecastResponse.isPresent()) {
+                            return forecastResponse.get();
                         } else {
                             throw new IllegalStateException("No response returned from met api for coordinates " + coordinates);
                         }
@@ -62,39 +63,38 @@ public class MetForcecastService {
                 }
             });
 
-    public MetForcecastService(OkHttpClient httpClient) {
+    public MetForecastService(OkHttpClient httpClient) {
         this.httpClient = httpClient;
     }
 
-    public Optional<MetForcecastResponse> getForecast(Coordinates coordinates) {
+    public Optional<MetForecastResponse> getForecast(Coordinates coordinates) {
         try {
-            MetForcecastResponse cachedForceastResponse = forecastResponseCache.getIfPresent(coordinates);
-            log.info("Logging cached responses {}", forecastResponseCache.asMap());
-            if (cachedForceastResponse != null) {
-               if (cachedForceastResponse.isDataFresh()) {
+            MetForecastResponse cachedForecast = forecastCache.getIfPresent(coordinates);
+            if (cachedForecast != null) {
+               if (cachedForecast.isDataFresh()) {
                    log.info("Returning cached response since it has not yet expired.");
-                   return Optional.of(cachedForceastResponse);
+                   return Optional.of(cachedForecast);
                }
 
                log.info("Forecast has expired. New forecast will be fetched");
 
-               String lastModified = cachedForceastResponse.lastModifiedHeader() != null ? cachedForceastResponse.lastModifiedHeader() : null;
-               Optional<MetForcecastResponse> refreshedForecastResponse = getForecastFromMetApi(coordinates, lastModified);
+               String lastModified = cachedForecast.lastModifiedHeader() != null ? cachedForecast.lastModifiedHeader() : null;
+               Optional<MetForecastResponse> refreshedForecastResponse = fetchMetForecastFromApi(coordinates, lastModified);
                if (refreshedForecastResponse.isEmpty()) {
-                   return Optional.of(cachedForceastResponse);
+                   return Optional.of(cachedForecast);
                }
-               forecastResponseCache.put(coordinates, refreshedForecastResponse.get());
+               forecastCache.put(coordinates, refreshedForecastResponse.get());
                return refreshedForecastResponse;
             }
-            return Optional.of(forecastResponseCache.get(coordinates));
+            return Optional.of(forecastCache.get(coordinates));
         } catch (Exception e) {
             log.error("Failed to retrieve forecast. Returning possible cached value", e);
-            return Optional.ofNullable(forecastResponseCache.getIfPresent(coordinates));
+            return Optional.ofNullable(forecastCache.getIfPresent(coordinates));
         }
     }
 
 
-    public Optional<MetForcecastResponse> getForecastFromMetApi(Coordinates coordinates, String ifModifiedHeader) throws IOException {
+    public Optional<MetForecastResponse> fetchMetForecastFromApi(Coordinates coordinates, String ifModifiedHeader) throws IOException {
         HttpUrl httpUrl = new HttpUrl.Builder()
                 .scheme("https")
                 .host(baseUrl)
@@ -128,7 +128,7 @@ public class MetForcecastService {
                     if (body != null) {
                         String json = body.string();
                         JsonNode jsonNode = objectMapper.readTree(json);
-                        return MetForcecastResponse.parseMetResponse(jsonNode, lastModifiedHeader, expiresHeader);
+                        return MetForecastResponse.parseMetResponse(jsonNode, lastModifiedHeader, expiresHeader);
                     }
                     break;
                 default:

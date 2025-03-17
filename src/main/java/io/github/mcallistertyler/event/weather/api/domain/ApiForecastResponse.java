@@ -2,5 +2,5 @@ package io.github.mcallistertyler.event.weather.api.domain;
 
 import java.util.List;
 
-public record ApiForecastResponse(List<MetForcecastResponse.TimeSeries> timeSeries, String message, int code) {
+public record ApiForecastResponse(List<WeatherData> weatherData, String message, int code) {
 }
