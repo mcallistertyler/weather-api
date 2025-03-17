@@ -25,6 +25,9 @@ The API has bandwith requirements:
 
 So in addition to adding monitoring to all API calls a threshold value could be used to prevent further requests or rate limiting methods could be used.
 
+Further considerations are that altitude data is missing, which they state can be recommended for more accurate temperature predictions:
+> Optional but recommended for precise temperature values. When missing the internal topography model is used for temperature correction, which is rather course and may be incorrect in hilly terrain.
+
 ## Endpoints
 
 Returns the weather forecast for the nearest available time after the current moment.
