@@ -5,7 +5,7 @@ This is the source code for the weather API. It serves as a basic implementation
 
 The service was written in Java 21 and is built via Gradle 4.10.2. A gradle wrapper is included with the code. Build, run and test shell scripts are also included to simplify the process.
 
-## List of improvements
+## List of improvements and next steps
 
 Some improvements could be made both technically and conceptually, such as:
 
